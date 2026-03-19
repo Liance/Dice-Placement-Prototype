@@ -3,16 +3,17 @@ import { getCardDefinition } from './game/definitions';
 import {
   attemptManualDiePlacement,
   attemptMoveCard,
-  canPlaceDieInSlot,
   createInitialGameState,
+  getCardDropPreview,
   getCardStatus,
+  getCompatibleTargets,
   getSlotRuleText,
   recomputeConnections,
   rollTrayDice,
   sanitizeLoadedState,
   tickGame
 } from './game/engine';
-import type { CardInstance, Die, GameState } from './game/types';
+import type { CardInstance, Die, GameState, SlotRule } from './game/types';
 import {
   BOARD_COLS,
   BOARD_ROWS,
@@ -39,6 +40,35 @@ type DragState =
       offsetX: number;
       offsetY: number;
     };
+
+type DropTarget = {
+  cardId: string;
+  slotId: string;
+};
+
+type PlacementFeedback = {
+  id: number;
+  cardId: string;
+  summary: string;
+  detail: string;
+};
+
+type CombatShellState = {
+  turn: number;
+  playerHp: number;
+  playerHpMax: number;
+  enemyHp: number;
+  enemyHpMax: number;
+  intentIndex: number;
+  actingSide: 'player';
+};
+
+const ENEMY_INTENTS = [
+  { label: 'Strike', value: 6, text: 'Direct hit next turn.' },
+  { label: 'Guard', value: 4, text: 'Blocks incoming damage.' },
+  { label: 'Shock', value: 2, text: 'Disrupts one loaded slot.' },
+  { label: 'Recover', value: 5, text: 'Repairs lost armor.' }
+];
 
 function DieFace({ value, rolling }: { value: number; rolling?: boolean }) {
   return (
@@ -69,13 +99,64 @@ function DieFace({ value, rolling }: { value: number; rolling?: boolean }) {
   );
 }
 
-function StatusChip({ label, value }: { label: string; value: string | number }) {
-  return (
-    <div className="status-chip">
-      <span className="status-chip__label">{label}</span>
-      <strong className="status-chip__value">{value}</strong>
-    </div>
-  );
+function parseDropTarget(value: string | undefined): DropTarget | null {
+  if (!value) {
+    return null;
+  }
+
+  const [cardId, slotId] = value.split('::');
+  if (!cardId || !slotId) {
+    return null;
+  }
+
+  return { cardId, slotId };
+}
+
+function getRuleClass(rule: SlotRule): string {
+  return `slot--rule-${rule.kind}`;
+}
+
+function getCardStateText(card: CardInstance, draggedDie: Die | null): string {
+  if (draggedDie) {
+    return `Drop ${draggedDie.value}`;
+  }
+
+  const definition = getCardDefinition(card.kind);
+  if (card.heldOutput.length > 0) {
+    return `Holding ${card.heldOutput.length}`;
+  }
+
+  if (definition.slotDefinitions.length === 0) {
+    return 'Auto';
+  }
+
+  const filledSlots = card.slotDice.filter(Boolean).length;
+  return `${filledSlots}/${definition.slotDefinitions.length} loaded`;
+}
+
+function getBoardPrompt(
+  draggingDie: Die | null,
+  hoveredPreview: { accepted: boolean; summary: string; detail: string } | null,
+  compatibleCount: number,
+  trayCount: number
+): string {
+  if (draggingDie && hoveredPreview) {
+    return `${hoveredPreview.summary} · ${hoveredPreview.detail}`;
+  }
+
+  if (draggingDie && compatibleCount > 0) {
+    return `Drop ${draggingDie.value} into a bright slot.`;
+  }
+
+  if (draggingDie) {
+    return `No module can take ${draggingDie.value}.`;
+  }
+
+  if (trayCount === 0) {
+    return 'Roll to refill your hand.';
+  }
+
+  return 'Drag a die into an active module.';
 }
 
 function App() {
@@ -91,13 +172,43 @@ function App() {
       return createInitialGameState();
     }
   });
+  const [combatShell, setCombatShell] = useState<CombatShellState>({
+    turn: 1,
+    playerHp: 28,
+    playerHpMax: 28,
+    enemyHp: 42,
+    enemyHpMax: 42,
+    intentIndex: 0,
+    actingSide: 'player'
+  });
   const [dragState, setDragState] = useState<DragState | null>(null);
+  const [hoveredSlot, setHoveredSlot] = useState<DropTarget | null>(null);
+  const [placementFeedback, setPlacementFeedback] = useState<PlacementFeedback | null>(
+    null
+  );
   const boardRef = useRef<HTMLDivElement | null>(null);
   const latestStateRef = useRef(gameState);
 
   const connections = recomputeConnections(gameState.cards);
   const draggingDie = dragState?.type === 'die' ? dragState.die : null;
   const draggingCardId = dragState?.type === 'card' ? dragState.cardId : null;
+  const compatibleTargets = draggingDie ? getCompatibleTargets(gameState, draggingDie) : [];
+  const compatibleSlotKeys = new Set(
+    compatibleTargets.map((target) => `${target.cardId}:${target.slotId}`)
+  );
+  const compatibleCardIds = new Set(compatibleTargets.map((target) => target.cardId));
+  const hoveredPreview =
+    draggingDie && hoveredSlot
+      ? getCardDropPreview(gameState, hoveredSlot.cardId, hoveredSlot.slotId, draggingDie)
+      : null;
+  const currentIntent = ENEMY_INTENTS[combatShell.intentIndex];
+  const discardPreview = gameState.discardPool.slice(-5);
+  const boardPrompt = getBoardPrompt(
+    draggingDie,
+    hoveredPreview,
+    compatibleTargets.length,
+    gameState.tray.length
+  );
 
   useEffect(() => {
     latestStateRef.current = gameState;
@@ -113,6 +224,20 @@ function App() {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(latestStateRef.current));
     };
   }, []);
+
+  useEffect(() => {
+    if (!placementFeedback) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setPlacementFeedback((current) =>
+        current?.id === placementFeedback.id ? null : current
+      );
+    }, 900);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [placementFeedback]);
 
   useEffect(() => {
     let frameId = 0;
@@ -138,6 +263,7 @@ function App() {
 
   useEffect(() => {
     if (!dragState) {
+      setHoveredSlot(null);
       return;
     }
 
@@ -151,22 +277,54 @@ function App() {
             }
           : current
       );
+
+      if (dragState.type !== 'die') {
+        setHoveredSlot(null);
+        return;
+      }
+
+      const rawTarget = document
+        .elementFromPoint(event.clientX, event.clientY)
+        ?.closest<HTMLElement>('[data-slot-drop]')
+        ?.dataset.slotDrop;
+
+      setHoveredSlot(parseDropTarget(rawTarget));
     };
 
     const onPointerUp = (event: PointerEvent) => {
+      const currentState = latestStateRef.current;
+
       setDragState((current) => {
         if (!current) {
           return current;
         }
 
         if (current.type === 'die') {
-          const dropTarget = document
+          const rawTarget = document
             .elementFromPoint(event.clientX, event.clientY)
-            ?.closest<HTMLElement>('[data-slot-drop]');
+            ?.closest<HTMLElement>('[data-slot-drop]')
+            ?.dataset.slotDrop;
+          const target = parseDropTarget(rawTarget);
 
-          if (dropTarget?.dataset.slotDrop) {
-            const [cardId, slotId] = dropTarget.dataset.slotDrop.split('::');
-            setGameState((state) => attemptManualDiePlacement(state, current.die.id, cardId, slotId));
+          if (target) {
+            const preview = getCardDropPreview(
+              currentState,
+              target.cardId,
+              target.slotId,
+              current.die
+            );
+
+            if (preview.accepted) {
+              setGameState((state) =>
+                attemptManualDiePlacement(state, current.die.id, target.cardId, target.slotId)
+              );
+              setPlacementFeedback({
+                id: Date.now(),
+                cardId: target.cardId,
+                summary: preview.summary,
+                detail: preview.detail
+              });
+            }
           }
         }
 
@@ -182,6 +340,8 @@ function App() {
 
         return null;
       });
+
+      setHoveredSlot(null);
     };
 
     window.addEventListener('pointermove', onPointerMove);
@@ -208,15 +368,7 @@ function App() {
     });
   };
 
-  const startCardDrag = (
-    event: React.PointerEvent<HTMLElement>,
-    card: CardInstance
-  ) => {
-    const target = event.target as HTMLElement;
-    if (target.closest('[data-no-card-drag="true"]')) {
-      return;
-    }
-
+  const startCardDrag = (event: React.PointerEvent<HTMLButtonElement>, card: CardInstance) => {
     event.preventDefault();
     const rect = event.currentTarget.getBoundingClientRect();
     setDragState({
@@ -224,35 +376,84 @@ function App() {
       cardId: card.id,
       currentX: event.clientX,
       currentY: event.clientY,
-      offsetX: event.clientX - rect.left,
-      offsetY: event.clientY - rect.top
+      offsetX: rect.width / 2,
+      offsetY: rect.height / 2
     });
   };
 
-  const discardPreview = gameState.discardPool.slice(-8);
+  const handleEndTurn = () => {
+    setDragState(null);
+    setHoveredSlot(null);
+    setPlacementFeedback(null);
+    setCombatShell((current) => ({
+      ...current,
+      turn: current.turn + 1,
+      intentIndex: (current.intentIndex + 1) % ENEMY_INTENTS.length
+    }));
+  };
 
   return (
-    <main className="app-shell">
-      <section className="hero-panel">
-        <div>
-          <p className="eyebrow">Dice Placement Idle RPG</p>
-          <h1>Mobile board prototype</h1>
-          <p className="lede">
-            Roll dice into the tray, drop them into card slots, and let connected cards
-            auto-route output through the grid.
-          </p>
+    <main className="combat-layout">
+      <section className="combat-hud">
+        <div className="turn-pillar">
+          <span className="section-kicker">Turn</span>
+          <strong>{combatShell.turn}</strong>
+          <span className="turn-pillar__phase">Your move</span>
         </div>
-        <div className="status-row">
-          <StatusChip label="Score" value={gameState.score} />
-          <StatusChip label="Discard" value={gameState.discardScore} />
-          <StatusChip
-            label="Tray"
-            value={`${gameState.tray.length}/${MAX_TRAY_DICE}`}
-          />
+
+        <div className="enemy-panel">
+          <div className="enemy-panel__header">
+            <div>
+              <p className="section-kicker">Enemy</p>
+              <h1>Clockwork Host</h1>
+            </div>
+            <div className="intent-readout">
+              <span className="intent-readout__label">Intent</span>
+              <strong>
+                {currentIntent.label}
+                {currentIntent.value ? ` ${currentIntent.value}` : ''}
+              </strong>
+            </div>
+          </div>
+
+          <div className="enemy-panel__body">
+            <div className="hp-panel">
+              <div className="hp-panel__row">
+                <span>HP</span>
+                <strong>
+                  {combatShell.enemyHp}/{combatShell.enemyHpMax}
+                </strong>
+              </div>
+              <div className="hp-bar">
+                <span
+                  className="hp-bar__fill hp-bar__fill--enemy"
+                  style={{
+                    width: `${
+                      (combatShell.enemyHp / combatShell.enemyHpMax) * 100
+                    }%`
+                  }}
+                />
+              </div>
+            </div>
+
+            <p className="enemy-panel__text">{currentIntent.text}</p>
+          </div>
         </div>
+
+        <button className="end-turn-button" type="button" onClick={handleEndTurn}>
+          End Turn
+        </button>
       </section>
 
-      <section className="board-panel">
+      <section className="board-band">
+        <div className="board-band__header">
+          <div>
+            <p className="section-kicker">Modules</p>
+            <h2>Combat board</h2>
+          </div>
+          <div className="board-band__prompt">{boardPrompt}</div>
+        </div>
+
         <div className="board-frame">
           <div
             ref={boardRef}
@@ -271,13 +472,31 @@ function App() {
             {gameState.cards.map((card) => {
               const definition = getCardDefinition(card.kind);
               const status = getCardStatus(gameState, card);
-              const isDragging = draggingCardId === card.id;
+              const isDraggingCard = draggingCardId === card.id;
+              const isCompatibleCard = draggingDie ? compatibleCardIds.has(card.id) : false;
+              const hoveredCard = hoveredSlot?.cardId === card.id;
+              const feedback = placementFeedback?.cardId === card.id ? placementFeedback : null;
+              const visualMode = draggingDie
+                ? isCompatibleCard
+                  ? 'card--focus'
+                  : status.totalSlots > 0
+                    ? 'card--blocked'
+                    : 'card--recede'
+                : status.isAwaitingOutput
+                  ? 'card--queued'
+                  : status.isReady && status.totalSlots > 0
+                    ? 'card--ready'
+                    : status.isActive
+                      ? 'card--active'
+                      : 'card--idle';
 
               return (
                 <article
                   key={card.id}
-                  className={`card ${status.isActive ? 'card--active' : 'card--inactive'} ${
-                    isDragging ? 'card--ghosted' : ''
+                  className={`card ${visualMode} ${
+                    hoveredCard ? 'card--hovered' : ''
+                  } ${isDraggingCard ? 'card--ghosted' : ''} ${
+                    feedback ? 'card--feedback' : ''
                   }`}
                   style={
                     {
@@ -289,15 +508,29 @@ function App() {
                       '--card-accent': definition.accent
                     } as React.CSSProperties
                   }
-                  onPointerDown={(event) => startCardDrag(event, card)}
                 >
                   <header className="card__header">
-                    <div>
-                      <h2>{definition.title}</h2>
-                      <p>{definition.description}</p>
+                    <div className="card__title-group">
+                      <h3>{definition.title}</h3>
+                      <p className="card__rule">{definition.ruleText}</p>
                     </div>
-                    <span className="card__drag">drag</span>
+                    <button
+                      type="button"
+                      className="card__handle"
+                      onPointerDown={(event) => startCardDrag(event, card)}
+                    >
+                      Move
+                    </button>
                   </header>
+
+                  <p className="card__effect">{definition.effectText}</p>
+
+                  <div className="card__state-row">
+                    <span className="card__state">{getCardStateText(card, draggingDie)}</span>
+                    <span className="card__count">
+                      {status.totalSlots > 0 ? `${status.filledSlots}/${status.totalSlots}` : 'Auto'}
+                    </span>
+                  </div>
 
                   <div className="card__body">
                     {definition.slotDefinitions.length > 0 ? (
@@ -311,54 +544,70 @@ function App() {
                       >
                         {definition.slotDefinitions.map((slot, slotIndex) => {
                           const die = card.slotDice[slotIndex];
-                          const canAcceptDraggedDie =
-                            draggingDie &&
-                            die === null &&
-                            canPlaceDieInSlot(draggingDie, slot.rule);
-                          const blocksDraggedDie =
-                            draggingDie &&
-                            die === null &&
-                            !canPlaceDieInSlot(draggingDie, slot.rule);
+                          const slotKey = `${card.id}:${slot.id}`;
+                          const isCompatibleSlot = draggingDie
+                            ? compatibleSlotKeys.has(slotKey)
+                            : false;
+                          const isHoveredSlot =
+                            hoveredSlot?.cardId === card.id &&
+                            hoveredSlot.slotId === slot.id;
+                          const preview =
+                            draggingDie && isHoveredSlot
+                              ? getCardDropPreview(gameState, card.id, slot.id, draggingDie)
+                              : null;
 
                           return (
                             <div
                               key={slot.id}
-                              data-no-card-drag="true"
                               data-slot-drop={`${card.id}::${slot.id}`}
-                              className={`slot ${
-                                canAcceptDraggedDie ? 'slot--valid' : ''
-                              } ${blocksDraggedDie ? 'slot--blocked' : ''}`}
+                              className={`slot ${getRuleClass(slot.rule)} ${
+                                die ? 'slot--filled' : ''
+                              } ${isCompatibleSlot ? 'slot--valid' : ''} ${
+                                draggingDie && !die && !isCompatibleSlot ? 'slot--blocked' : ''
+                              } ${isHoveredSlot ? 'slot--hovered' : ''}`}
                             >
-                              <span className="slot__label">{slot.label}</span>
-                              <span className="slot__rule">{getSlotRuleText(slot.rule)}</span>
+                              <span className="slot__condition">
+                                {getSlotRuleText(slot.rule)}
+                              </span>
                               <div className="slot__content">
-                                {die ? <DieFace value={die.value} /> : <span className="slot__empty">Drop die</span>}
+                                {die ? (
+                                  <DieFace value={die.value} />
+                                ) : preview ? (
+                                  <div
+                                    className={`slot__preview ${
+                                      preview.accepted
+                                        ? 'slot__preview--valid'
+                                        : 'slot__preview--blocked'
+                                    }`}
+                                  >
+                                    <strong>{preview.summary}</strong>
+                                    <span>{preview.detail}</span>
+                                  </div>
+                                ) : (
+                                  <span className="slot__empty">Drop</span>
+                                )}
                               </div>
                             </div>
                           );
                         })}
                       </div>
                     ) : (
-                      <div className="card__empty-state">
-                        No manual slots.
-                      </div>
+                      <div className="card__auto-well">Auto module</div>
                     )}
                   </div>
 
-                  <div className="card__footer" data-no-card-drag="true">
-                    <div className="buffer-strip">
-                      <span className="buffer-strip__label">
-                        Buffer {card.inputBuffer.length > 0 ? `(${card.inputBuffer.length})` : ''}
-                      </span>
-                      <div className="buffer-strip__dice">
+                  <div className="card__footer">
+                    <div className="queue-rail">
+                      <span className="queue-rail__label">Queue</span>
+                      <div className="queue-rail__track">
                         {card.inputBuffer.length > 0 ? (
                           card.inputBuffer.slice(0, 6).map((die) => (
-                            <span key={die.id} className="buffer-strip__token">
+                            <span key={die.id} className="queue-rail__token">
                               {die.value}
                             </span>
                           ))
                         ) : (
-                          <span className="buffer-strip__empty">Empty</span>
+                          <span className="queue-rail__empty">Empty</span>
                         )}
                       </div>
                     </div>
@@ -372,43 +621,44 @@ function App() {
                       </div>
                       <span className="progress-row__meta">
                         {status.isAwaitingOutput
-                          ? 'Waiting for output link'
+                          ? 'Queued'
                           : `${Math.round(status.progressRatio * 100)}%`}
                       </span>
                     </div>
-
-                    <div className="card__meta">
-                      <span className={`card__pill ${status.hasConnectedInput ? 'card__pill--live' : ''}`}>
-                        In {status.hasConnectedInput ? 'linked' : 'open'}
-                      </span>
-                      <span className={`card__pill ${status.hasConnectedOutput ? 'card__pill--live' : ''}`}>
-                        Out {status.hasConnectedOutput ? 'linked' : 'open'}
-                      </span>
-                      {card.heldOutput.length > 0 ? (
-                        <span className="card__pill card__pill--alert">
-                          Holding {card.heldOutput.length}
-                        </span>
-                      ) : null}
-                    </div>
                   </div>
 
-                  {getCardDefinition(card.kind).inputEdges.map((edge) => (
+                  {feedback ? (
+                    <div className="card__feedback">
+                      <strong>{feedback.summary}</strong>
+                      <span>{feedback.detail}</span>
+                    </div>
+                  ) : null}
+
+                  {definition.inputEdges.map((edge) => (
                     <span
                       key={edge.id}
                       className={`port port--input port--${edge.side} ${
-                        connections.inputToOutput[`${card.id}:${edge.id}`] ? 'port--connected' : ''
+                        connections.inputToOutput[`${card.id}:${edge.id}`]
+                          ? 'port--connected'
+                          : ''
                       }`}
                       style={{ '--edge-index': edge.index } as React.CSSProperties}
-                    />
+                    >
+                      IN
+                    </span>
                   ))}
-                  {getCardDefinition(card.kind).outputEdges.map((edge) => (
+                  {definition.outputEdges.map((edge) => (
                     <span
                       key={edge.id}
                       className={`port port--output port--${edge.side} ${
-                        connections.outputToInput[`${card.id}:${edge.id}`] ? 'port--connected' : ''
+                        connections.outputToInput[`${card.id}:${edge.id}`]
+                          ? 'port--connected'
+                          : ''
                       }`}
                       style={{ '--edge-index': edge.index } as React.CSSProperties}
-                    />
+                    >
+                      OUT
+                    </span>
                   ))}
                 </article>
               );
@@ -417,57 +667,104 @@ function App() {
         </div>
       </section>
 
-      <section className="bottom-panel">
-        <div className="discard-panel">
-          <div>
-            <p className="eyebrow">Discard Pool</p>
-            <strong>{gameState.discardPool.length} dice removed</strong>
+      <section className="player-dock">
+        <div className="player-panel">
+          <div className="player-panel__header">
+            <div>
+              <p className="section-kicker">Player</p>
+              <h2>Dice hand</h2>
+            </div>
+            <span className="player-panel__phase">Acting now</span>
           </div>
-          <div className="discard-panel__dice">
-            {discardPreview.length > 0 ? (
-              discardPreview.map((die) => (
-                <span key={die.id} className="discard-panel__token">
-                  {die.value}
-                </span>
-              ))
-            ) : (
-              <span className="discard-panel__empty">No discarded dice yet</span>
-            )}
+
+          <div className="hp-panel">
+            <div className="hp-panel__row">
+              <span>HP</span>
+              <strong>
+                {combatShell.playerHp}/{combatShell.playerHpMax}
+              </strong>
+            </div>
+            <div className="hp-bar">
+              <span
+                className="hp-bar__fill hp-bar__fill--player"
+                style={{
+                  width: `${(combatShell.playerHp / combatShell.playerHpMax) * 100}%`
+                }}
+              />
+            </div>
+          </div>
+
+          <div className="player-panel__stats">
+            <div className="mini-stat">
+              <span>Score</span>
+              <strong>{gameState.score}</strong>
+            </div>
+            <div className="mini-stat">
+              <span>Discard</span>
+              <strong>{gameState.discardScore}</strong>
+            </div>
+          </div>
+
+          <div className="discard-strip">
+            <span className="discard-strip__label">Recent discards</span>
+            <div className="discard-strip__track">
+              {discardPreview.length > 0 ? (
+                discardPreview.map((die) => (
+                  <span key={die.id} className="discard-strip__token">
+                    {die.value}
+                  </span>
+                ))
+              ) : (
+                <span className="discard-strip__empty">None</span>
+              )}
+            </div>
           </div>
         </div>
 
         <div className="tray-panel">
           <div className="tray-panel__header">
             <div>
-              <p className="eyebrow">Dice Tray</p>
-              <strong>Manual rolls feed the player tray</strong>
+              <p className="section-kicker">Hand</p>
+              <h2>Available dice</h2>
             </div>
-            <button
-              className="roll-button"
-              type="button"
-              onClick={() => setGameState((state) => rollTrayDice(state, MANUAL_ROLL_COUNT))}
-              disabled={gameState.tray.length >= MAX_TRAY_DICE}
-            >
-              Roll 3 Dice
-            </button>
+
+            <div className="tray-panel__controls">
+              <span className="tray-panel__count">
+                {gameState.tray.length}/{MAX_TRAY_DICE}
+              </span>
+              <button
+                className="roll-button"
+                type="button"
+                onClick={() => setGameState((state) => rollTrayDice(state, MANUAL_ROLL_COUNT))}
+                disabled={gameState.tray.length >= MAX_TRAY_DICE}
+              >
+                Roll 3
+              </button>
+            </div>
           </div>
 
-          <div className="tray-dice">
+          <div className="tray-shelf">
             {gameState.tray.map((die) => (
               <button
                 key={die.id}
                 type="button"
-                className="tray-die"
+                className={`tray-die ${
+                  draggingDie?.id === die.id ? 'tray-die--dragging' : ''
+                }`}
                 onPointerDown={(event) => startDieDrag(event, die)}
               >
                 <DieFace value={die.value} rolling={gameState.timeMs - die.createdAt < 700} />
               </button>
             ))}
-            {Array.from({ length: Math.max(0, MAX_TRAY_DICE - gameState.tray.length) }, (_, index) => (
-              <span key={`empty-${index}`} className="tray-dice__empty">
-                Empty
-              </span>
-            ))}
+
+            {Array.from(
+              { length: Math.max(0, MAX_TRAY_DICE - gameState.tray.length) },
+              (_, index) => (
+                <span key={`empty-${index}`} className="tray-slot">
+                  Empty
+                </span>
+              )
+            )}
           </div>
         </div>
       </section>
@@ -486,10 +783,12 @@ function App() {
               <DieFace value={dragState.die.value} />
             ) : (
               <div className="drag-ghost__card">
-                {getCardDefinition(
-                  gameState.cards.find((card) => card.id === dragState.cardId)?.kind ??
-                    'generator'
-                ).title}
+                {
+                  getCardDefinition(
+                    gameState.cards.find((card) => card.id === dragState.cardId)?.kind ??
+                      'generator'
+                  ).title
+                }
               </div>
             )}
           </div>

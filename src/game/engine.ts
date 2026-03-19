@@ -420,6 +420,9 @@ function getCardStatusFromConnections(
     isAwaitingOutput,
     hasConnectedInput,
     hasConnectedOutput,
+    isReady: slotsFilled,
+    filledSlots: card.slotDice.filter(Boolean).length,
+    totalSlots: definition.slotDefinitions.length,
     progressRatio: isAwaitingOutput
       ? 1
       : Math.min(1, card.progressMs / definition.cycleMs)
@@ -429,6 +432,112 @@ function getCardStatusFromConnections(
 export function getCardStatus(state: GameState, card: CardInstance): CardStatus {
   const connections = recomputeConnections(state.cards);
   return getCardStatusFromConnections(card, connections);
+}
+
+export function getCompatibleTargets(
+  state: GameState,
+  die: Die
+): Array<{ cardId: string; slotId: string }> {
+  const matches: Array<{ cardId: string; slotId: string }> = [];
+
+  for (const card of state.cards) {
+    const definition = getCardDefinition(card.kind);
+
+    definition.slotDefinitions.forEach((slot, index) => {
+      if (card.slotDice[index] !== null) {
+        return;
+      }
+
+      if (!canPlaceDieInSlot(die, slot.rule)) {
+        return;
+      }
+
+      matches.push({ cardId: card.id, slotId: slot.id });
+    });
+  }
+
+  return matches;
+}
+
+function countRemainingOpenSlotsAfterPlacement(
+  card: CardInstance,
+  slotIndex: number
+): number {
+  return card.slotDice.filter((die, index) => die === null && index !== slotIndex).length;
+}
+
+function getCompletionPreview(card: CardInstance, die: Die): string {
+  switch (card.kind) {
+    case 'snakeEyes': {
+      const total =
+        card.slotDice.reduce((sum, slotDie) => sum + (slotDie?.value ?? 0), 0) + die.value;
+      return `Ready: ${total}x1`;
+    }
+    case 'highRoller':
+      return `Ready: 2x${die.value}`;
+    case 'sixShooter':
+      return 'Ready: +6 score';
+    case 'generator':
+      return 'Auto';
+  }
+}
+
+export function getCardDropPreview(
+  state: GameState,
+  cardId: string,
+  slotId: string,
+  die: Die
+): { accepted: boolean; summary: string; detail: string } {
+  const card = getCardById(state, cardId);
+  if (!card) {
+    return {
+      accepted: false,
+      summary: 'No target',
+      detail: 'Move onto a module slot.'
+    };
+  }
+
+  const definition = getCardDefinition(card.kind);
+  const slotIndex = definition.slotDefinitions.findIndex((slot) => slot.id === slotId);
+  if (slotIndex < 0) {
+    return {
+      accepted: false,
+      summary: 'No slot',
+      detail: 'Choose a visible slot.'
+    };
+  }
+
+  if (card.slotDice[slotIndex] !== null) {
+    return {
+      accepted: false,
+      summary: 'Occupied',
+      detail: 'That slot is already filled.'
+    };
+  }
+
+  const slot = definition.slotDefinitions[slotIndex];
+  if (!canPlaceDieInSlot(die, slot.rule)) {
+    return {
+      accepted: false,
+      summary: 'Blocked',
+      detail: `Needs ${getSlotRuleText(slot.rule)}`
+    };
+  }
+
+  const remainingSlots = countRemainingOpenSlotsAfterPlacement(card, slotIndex);
+  if (remainingSlots === 0) {
+    return {
+      accepted: true,
+      summary: getCompletionPreview(card, die),
+      detail: `Cycle ${Math.round(definition.cycleMs / 1000)}s`
+    };
+  }
+
+  return {
+    accepted: true,
+    summary: `Place ${die.value}`,
+    detail: `${remainingSlots} slot${remainingSlots === 1 ? '' : 's'} left`
+  };
 }
 
 export function rollTrayDice(

@@ -42,6 +42,8 @@ export interface CardDefinition {
   kind: CardKind;
   title: string;
   description: string;
+  ruleText: string;
+  effectText: string;
   color: string;
   accent: string;
   size: {
@@ -77,6 +79,9 @@ export interface CardStatus {
   isAwaitingOutput: boolean;
   hasConnectedInput: boolean;
   hasConnectedOutput: boolean;
+  isReady: boolean;
+  filledSlots: number;
+  totalSlots: number;
   progressRatio: number;
 }
 
