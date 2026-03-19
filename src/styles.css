@@ -60,6 +60,27 @@ button {
   gap: 14px;
 }
 
+.hero-panel__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.hero-panel__link {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px 16px;
+  border-radius: 16px;
+  background: linear-gradient(180deg, #89daff, #4fa9ff);
+  color: #08121f;
+  text-decoration: none;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
 .eyebrow {
   margin: 0 0 6px;
   color: #ffba49;

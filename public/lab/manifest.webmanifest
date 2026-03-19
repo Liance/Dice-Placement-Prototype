@@ -1,0 +1,20 @@
+{
+  "id": "./ui-lab",
+  "name": "Dice Placement UI Lab",
+  "short_name": "Dice Lab",
+  "description": "Sandbox for fast mobile UI and UX iteration.",
+  "display": "standalone",
+  "background_color": "#101620",
+  "theme_color": "#101620",
+  "start_url": "./",
+  "scope": "./",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

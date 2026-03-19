@@ -234,13 +234,18 @@ function App() {
   return (
     <main className="app-shell">
       <section className="hero-panel">
-        <div>
-          <p className="eyebrow">Dice Placement Idle RPG</p>
-          <h1>Mobile board prototype</h1>
-          <p className="lede">
-            Roll dice into the tray, drop them into card slots, and let connected cards
-            auto-route output through the grid.
-          </p>
+        <div className="hero-panel__header">
+          <div>
+            <p className="eyebrow">Dice Placement Idle RPG</p>
+            <h1>Mobile board prototype</h1>
+            <p className="lede">
+              Roll dice into the tray, drop them into card slots, and let connected cards
+              auto-route output through the grid.
+            </p>
+          </div>
+          <a className="hero-panel__link" href="./lab/">
+            Open UI Lab
+          </a>
         </div>
         <div className="status-row">
           <StatusChip label="Score" value={gameState.score} />

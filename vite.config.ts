@@ -1,4 +1,5 @@
 import { defineConfig } from 'vite';
+import { fileURLToPath } from 'node:url';
 import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
 
@@ -7,11 +8,19 @@ const isGitHubActionsBuild = process.env.GITHUB_ACTIONS === 'true';
 
 export default defineConfig({
   base: isGitHubActionsBuild ? `/${repoName}/` : '/',
+  build: {
+    rollupOptions: {
+      input: {
+        main: fileURLToPath(new URL('./index.html', import.meta.url)),
+        lab: fileURLToPath(new URL('./lab/index.html', import.meta.url))
+      }
+    }
+  },
   plugins: [
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['icon.svg'],
+      includeAssets: ['icon.svg', 'lab/icon.svg', 'lab/manifest.webmanifest'],
       manifest: {
         name: 'Dice Placement Prototype',
         short_name: 'DicePlace',
