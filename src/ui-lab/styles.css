@@ -20,6 +20,7 @@ body,
 
 body {
   min-height: 100dvh;
+  overscroll-behavior: none;
 }
 
 button,
@@ -33,12 +34,9 @@ button {
 
 .lab-shell {
   min-height: 100dvh;
-  padding:
-    max(14px, env(safe-area-inset-top))
-    12px
-    max(14px, env(safe-area-inset-bottom));
-  display: grid;
-  gap: 12px;
+  padding-top: max(14px, env(safe-area-inset-top));
+  padding-inline: 12px;
+  padding-bottom: calc(240px + env(safe-area-inset-bottom));
 }
 
 .lab-topbar,
@@ -49,6 +47,12 @@ button {
   border-radius: 24px;
   background: rgba(16, 22, 32, 0.92);
   box-shadow: 0 12px 28px rgba(0, 0, 0, 0.24);
+}
+
+.lab-scroll {
+  display: grid;
+  gap: 12px;
+  padding-bottom: 12px;
 }
 
 .lab-topbar {
@@ -247,6 +251,11 @@ button {
   padding: 14px;
   display: grid;
   gap: 10px;
+  transition:
+    opacity 140ms ease,
+    transform 140ms ease,
+    border-color 140ms ease,
+    box-shadow 140ms ease;
 }
 
 .lab-module--ready {
@@ -259,6 +268,16 @@ button {
 
 .lab-module--blocked {
   opacity: 0.8;
+}
+
+.lab-module--focus {
+  transform: translateY(-2px);
+  border-color: rgba(108, 240, 216, 0.45);
+  box-shadow: 0 14px 24px rgba(0, 0, 0, 0.24);
+}
+
+.lab-module--recede {
+  opacity: 0.44;
 }
 
 .lab-module__header h3 {
@@ -292,6 +311,12 @@ button {
   display: grid;
   gap: 8px;
   color: inherit;
+  transition:
+    opacity 120ms ease,
+    transform 120ms ease,
+    border-color 120ms ease,
+    background 120ms ease,
+    box-shadow 120ms ease;
 }
 
 .lab-slot__requirement {
@@ -317,6 +342,18 @@ button {
 .lab-slot--blocked {
   border-style: dashed;
   opacity: 0.48;
+}
+
+.lab-slot--hovered {
+  transform: translateY(-2px) scale(1.01);
+}
+
+.lab-slot--hovered.lab-slot--valid {
+  box-shadow: 0 0 0 3px rgba(108, 240, 216, 0.12);
+}
+
+.lab-slot--hovered.lab-slot--blocked {
+  border-color: rgba(255, 120, 120, 0.65);
 }
 
 .lab-slot--filled {
@@ -379,9 +416,16 @@ button {
 }
 
 .lab-hand {
+  position: fixed;
+  left: 12px;
+  right: 12px;
+  bottom: max(12px, env(safe-area-inset-bottom));
+  z-index: 25;
   padding: 12px;
   display: grid;
   gap: 12px;
+  background: rgba(16, 22, 32, 0.96);
+  backdrop-filter: blur(18px);
 }
 
 .lab-tray__grid {
@@ -398,11 +442,18 @@ button {
   background: rgba(255, 255, 255, 0.04);
   display: grid;
   place-items: center;
+  touch-action: none;
+  transition:
+    transform 120ms ease,
+    border-color 120ms ease,
+    background 120ms ease,
+    opacity 120ms ease;
 }
 
 .lab-tray__die--active {
   border-color: rgba(108, 240, 216, 0.6);
   background: rgba(108, 240, 216, 0.1);
+  opacity: 0.3;
 }
 
 .lab-tray__empty {
@@ -416,6 +467,40 @@ button {
 .lab-feedback {
   min-height: 24px;
   font-size: 0.82rem;
+}
+
+.lab-drag-layer {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 50;
+}
+
+.lab-drag-ghost {
+  position: absolute;
+  left: 0;
+  top: 0;
+  opacity: 0.96;
+  filter: drop-shadow(0 18px 20px rgba(0, 0, 0, 0.32));
+}
+
+@media (min-width: 860px) {
+  .lab-shell {
+    max-width: 1080px;
+    margin: 0 auto;
+    padding-bottom: calc(192px + env(safe-area-inset-bottom));
+  }
+
+  .lab-hand {
+    left: max(12px, calc((100vw - 1080px) / 2 + 12px));
+    right: max(12px, calc((100vw - 1080px) / 2 + 12px));
+    grid-template-columns: 0.85fr 1.15fr;
+    align-items: start;
+  }
+
+  .lab-tray__grid {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
 }
 
 .lab-die {
