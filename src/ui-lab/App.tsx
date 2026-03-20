@@ -439,10 +439,7 @@ function App() {
       <section className="lab-hand">
         <div className="lab-player">
           <div className="lab-player__header">
-            <div>
-              <p className="lab-eyebrow">Player</p>
-              <h2>Phone test state</h2>
-            </div>
+            <strong className="lab-player__label">Player</strong>
             <span className="lab-player__turn">Turn {currentScenario.player.turn}</span>
           </div>
 
@@ -462,18 +459,11 @@ function App() {
               {currentScenario.player.hp}/{currentScenario.player.hpMax}
             </strong>
           </div>
-
-          <p className="lab-feedback">
-            {state.feedback ?? 'Drag a die to any highlighted slot.'}
-          </p>
         </div>
 
         <div className="lab-tray">
           <div className="lab-tray__header">
-            <div>
-              <p className="lab-eyebrow">Hand</p>
-              <h2>Drag-ready dice</h2>
-            </div>
+            <strong className="lab-tray__label">Hand</strong>
             <span className="lab-tray__count">{state.tray.length} dice</span>
           </div>
           <div className="lab-tray__grid">
